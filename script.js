@@ -10,6 +10,7 @@ const deck = suits.flatMap((suit) => ranks.map((rank, index) => ({
 })));
 
 let selected = [];
+const scoreRankCounts = new Int8Array(14);
 
 const deckEl = document.querySelector("#deck");
 const dealtCardsEl = document.querySelector("#dealtCards");
@@ -60,58 +61,59 @@ function combinations(items, size) {
   return out;
 }
 
-function forEachCombination(items, size, callback, start = 0, combo = []) {
-  if (combo.length === size) {
-    callback(combo);
-    return;
-  }
-
-  const remaining = size - combo.length;
-  for (let index = start; index <= items.length - remaining; index += 1) {
-    combo.push(items[index]);
-    forEachCombination(items, size, callback, index + 1, combo);
-    combo.pop();
-  }
-}
-
 function scoreFiveCards(hand, starter, isCrib = false) {
-  const cards = [...hand, starter];
   let score = 0;
+  scoreRankCounts.fill(0);
 
-  for (let mask = 1; mask < 1 << cards.length; mask += 1) {
+  const cardCount = hand.length + 1;
+  for (let mask = 1; mask < 1 << cardCount; mask += 1) {
     let total = 0;
     let count = 0;
-    for (let index = 0; index < cards.length; index += 1) {
+    for (let index = 0; index < cardCount; index += 1) {
       if (mask & (1 << index)) {
-        total += cards[index].value;
+        total += index < hand.length ? hand[index].value : starter.value;
         count += 1;
       }
     }
     if (count >= 2 && total === 15) score += 2;
   }
 
-  const rankGroups = new Map();
-  cards.forEach((card) => rankGroups.set(card.rank, (rankGroups.get(card.rank) || 0) + 1));
-  for (const count of rankGroups.values()) {
+  for (let index = 0; index < hand.length; index += 1) {
+    scoreRankCounts[hand[index].order] += 1;
+  }
+  scoreRankCounts[starter.order] += 1;
+
+  for (let index = 1; index < scoreRankCounts.length; index += 1) {
+    const count = scoreRankCounts[index];
     if (count > 1) score += (count * (count - 1)) / 2 * 2;
   }
 
-  score += runScore(cards);
+  score += runScore(scoreRankCounts);
 
-  const handFlush = hand.every((card) => card.suit === hand[0].suit);
+  const flushSuit = hand[0].suit;
+  let handFlush = true;
+  for (let index = 1; index < hand.length; index += 1) {
+    if (hand[index].suit !== flushSuit) {
+      handFlush = false;
+      break;
+    }
+  }
   if (handFlush) {
-    if (starter.suit === hand[0].suit) score += 5;
+    if (starter.suit === flushSuit) score += 5;
     else if (!isCrib) score += 4;
   }
 
-  if (hand.some((card) => card.rank === "J" && card.suit === starter.suit)) score += 1;
+  for (let index = 0; index < hand.length; index += 1) {
+    if (hand[index].rank === "J" && hand[index].suit === starter.suit) {
+      score += 1;
+      break;
+    }
+  }
 
   return score;
 }
 
-function runScore(cards) {
-  const counts = Array(14).fill(0);
-  cards.forEach((card) => { counts[card.order] += 1; });
+function runScore(counts) {
   let best = 0;
 
   for (let start = 1; start <= 13; start += 1) {
@@ -130,57 +132,101 @@ function runScore(cards) {
 }
 
 function averageHand(keep, remainingDeck, fixedStarter) {
-  const starters = fixedStarter ? [fixedStarter] : remainingDeck;
-  return starters.reduce((sum, starter) => sum + scoreFiveCards(keep, starter), 0) / starters.length;
+  if (fixedStarter) return scoreFiveCards(keep, fixedStarter);
+
+  let total = 0;
+  for (let index = 0; index < remainingDeck.length; index += 1) {
+    total += scoreFiveCards(keep, remainingDeck[index]);
+  }
+  return total / remainingDeck.length;
 }
 
 function averageCrib(discard, remainingDeck, fixedStarter) {
-  const starters = fixedStarter ? [fixedStarter] : remainingDeck;
   const fillCount = 4 - discard.length;
   let total = 0;
-  let count = 0;
-
-  for (const starter of starters) {
-    const fillDeck = remainingDeck.filter((card) => card.id !== starter.id);
-    forEachCombination(fillDeck, fillCount, (fill) => {
-      total += scoreFiveCards([...discard, ...fill], starter, true);
-      count += 1;
-    });
+  let iterations = 0;
+  const cribHand = Array(4);
+  for (let index = 0; index < discard.length; index += 1) {
+    cribHand[index] = discard[index];
   }
 
-  return total / count;
+  function scoreStarter(starter) {
+    if (fillCount === 2) {
+      for (let first = 0; first < remainingDeck.length - 1; first += 1) {
+        if (remainingDeck[first].id === starter.id) continue;
+        cribHand[discard.length] = remainingDeck[first];
+        for (let second = first + 1; second < remainingDeck.length; second += 1) {
+          if (remainingDeck[second].id === starter.id) continue;
+          cribHand[discard.length + 1] = remainingDeck[second];
+          total += scoreFiveCards(cribHand, starter, true);
+          iterations += 1;
+        }
+      }
+      return;
+    }
+
+    for (let first = 0; first < remainingDeck.length - 2; first += 1) {
+      if (remainingDeck[first].id === starter.id) continue;
+      cribHand[discard.length] = remainingDeck[first];
+      for (let second = first + 1; second < remainingDeck.length - 1; second += 1) {
+        if (remainingDeck[second].id === starter.id) continue;
+        cribHand[discard.length + 1] = remainingDeck[second];
+        for (let third = second + 1; third < remainingDeck.length; third += 1) {
+          if (remainingDeck[third].id === starter.id) continue;
+          cribHand[discard.length + 2] = remainingDeck[third];
+          total += scoreFiveCards(cribHand, starter, true);
+          iterations += 1;
+        }
+      }
+    }
+  }
+
+  if (fixedStarter) {
+    scoreStarter(fixedStarter);
+  } else {
+    for (let index = 0; index < remainingDeck.length; index += 1) {
+      scoreStarter(remainingDeck[index]);
+    }
+  }
+
+  return total / iterations;
 }
 
 function renderDeck() {
   if (!deckEl) return;
 
-  deckEl.innerHTML = "";
+  const fragment = document.createDocumentFragment();
   deck.forEach((card) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `cardButton ${isRed(card) ? "red" : ""} ${selected.includes(card.id) ? "selected" : ""}`;
+    const isSelected = selected.includes(card.id);
+    button.className = `cardButton ${isRed(card) ? "red" : ""} ${isSelected ? "selected" : ""}`;
     button.textContent = cardLabel(card);
-    button.title = selected.includes(card.id) ? "Remove card" : "Add card";
+    button.title = isSelected ? "Remove card" : "Add card";
     button.addEventListener("click", () => toggleCard(card.id));
-    deckEl.append(button);
+    fragment.append(button);
   });
+  deckEl.replaceChildren(fragment);
 }
 
 function renderStarterOptions() {
   const current = starterSelect.value;
-  starterSelect.innerHTML = '<option value="">Auto-average all cuts</option>';
+  starterSelect.replaceChildren();
+  const defaultOpt = new Option("Auto-average all cuts", "");
+  starterSelect.add(defaultOpt);
+
   deck.filter((card) => !selected.includes(card.id)).forEach((card) => {
-    const option = document.createElement("option");
-    option.value = card.id;
-    option.textContent = cardLabel(card);
-    starterSelect.append(option);
+    starterSelect.add(new Option(cardLabel(card), card.id));
   });
-  starterSelect.value = deck.some((card) => card.id === current && !selected.includes(current)) ? current : "";
+
+  const stillValid = deck.some((card) => card.id === current && !selected.includes(current));
+  starterSelect.value = stillValid ? current : "";
 }
 
 function renderDealtSelectors() {
   const need = dealtCount();
-  dealtCardsEl.innerHTML = "";
+  dealtCardsEl.replaceChildren();
+  const fragment = document.createDocumentFragment();
   dealtCardsEl.classList.toggle("empty", false);
 
   for (let index = 0; index < need; index += 1) {
@@ -188,17 +234,15 @@ function renderDealtSelectors() {
     const currentCard = current ? getCard(current) : null;
     const select = document.createElement("select");
     select.className = `cardSelect ${currentCard && isRed(currentCard) ? "red" : ""}`;
-    select.setAttribute("aria-label", `Dealt card ${index + 1}`);
-    select.innerHTML = `<option value="">Card ${index + 1}</option>`;
+    select.ariaLabel = `Dealt card ${index + 1}`;
+    select.add(new Option(`Card ${index + 1}`, ""));
 
     deck
       .filter((card) => card.id === current || !selected.includes(card.id))
       .forEach((card) => {
-        const option = document.createElement("option");
-        option.value = card.id;
-        option.textContent = cardLabel(card);
+        const option = new Option(cardLabel(card), card.id);
         if (isRed(card)) option.className = "red";
-        select.append(option);
+        select.add(option);
       });
 
     select.value = current;
@@ -207,12 +251,13 @@ function renderDealtSelectors() {
       starterSelect.value = "";
       update();
     });
-    dealtCardsEl.append(select);
+    fragment.append(select);
   }
+  dealtCardsEl.appendChild(fragment);
 }
 
 function renderCardRow(el, cards, fallback) {
-  el.innerHTML = "";
+  el.replaceChildren();
   el.classList.toggle("empty", cards.length === 0);
   if (!cards.length) {
     el.textContent = fallback;
@@ -275,7 +320,7 @@ function update() {
 }
 
 function renderResults(selectedCards, starter) {
-  resultsBody.innerHTML = "";
+  resultsBody.replaceChildren();
 
   if (selectedCards.length !== dealtCount()) {
     summaryEl.textContent = `Choose ${dealtCount() - selectedCards.length} more card${dealtCount() - selectedCards.length === 1 ? "" : "s"} to rank discard options.`;
@@ -297,24 +342,53 @@ function renderResults(selectedCards, starter) {
   }).sort((a, b) => b.net - a.net);
 
   const best = rows[0];
-  summaryEl.innerHTML = `Best discard: <strong>${best.discard.map(cardLabel).join(" ")}</strong>. Expected net: <strong>${best.net.toFixed(2)}</strong>.`;
+  summaryEl.replaceChildren();
+  summaryEl.append("Best discard: ");
+  const strongDiscard = document.createElement("strong");
+  strongDiscard.textContent = best.discard.map(cardLabel).join(" ");
+  summaryEl.append(strongDiscard, ". Expected net: ");
+  const strongNet = document.createElement("strong");
+  strongNet.textContent = best.net.toFixed(2);
+  summaryEl.append(strongNet, ".");
+
   resultMetaEl.textContent = starter ? `Scored with ${cardLabel(starter)} starter` : "Averaged across all possible starters";
 
+  const fragment = document.createDocumentFragment();
   rows.forEach((row) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${formatCards(row.keep)}</td>
-      <td>${formatCards(row.discard)}</td>
-      <td class="score">${row.handAvg.toFixed(2)}</td>
-      <td class="score">${row.cribAvg.toFixed(2)}</td>
-      <td class="score">${row.net.toFixed(2)}</td>
-    `;
-    resultsBody.append(tr);
+
+    const tdKeep = document.createElement("td");
+    tdKeep.append(...formatCards(row.keep));
+
+    const tdDiscard = document.createElement("td");
+    tdDiscard.append(...formatCards(row.discard));
+
+    tr.append(tdKeep);
+    tr.append(tdDiscard);
+
+    const handAvgTd = document.createElement("td");
+    handAvgTd.className = "score";
+    handAvgTd.textContent = row.handAvg.toFixed(2);
+    const cribAvgTd = document.createElement("td");
+    cribAvgTd.className = "score";
+    cribAvgTd.textContent = row.cribAvg.toFixed(2);
+    const netTd = document.createElement("td");
+    netTd.className = "score";
+    netTd.textContent = row.net.toFixed(2);
+
+    tr.append(handAvgTd, cribAvgTd, netTd);
+    fragment.append(tr);
   });
+  resultsBody.appendChild(fragment);
 }
 
 function formatCards(cards) {
-  return cards.map((card) => `<span class="pill ${isRed(card) ? "red" : ""}">${cardLabel(card)}</span>`).join(" ");
+  return cards.map((card) => {
+    const span = document.createElement("span");
+    span.className = `pill ${isRed(card) ? "red" : ""}`;
+    span.textContent = cardLabel(card);
+    return span;
+  });
 }
 
 playersSelect.addEventListener("change", update);
