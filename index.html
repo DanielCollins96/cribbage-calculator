@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cribbage Calculator</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app">
+      <div class="topPanel">
+        <section class="toolbar">
+          <div>
+            <h1>Cribbage Calculator</h1>
+            <p id="dealHint">Select 6 cards for a 2-player deal.</p>
+          </div>
+          <div class="toolbarActions">
+            <button id="randomDealButton" type="button" title="Deal 6 random cards">Random Deal</button>
+            <button id="resetButton" type="button" title="Clear all cards">Reset</button>
+          </div>
+        </section>
+
+        <section class="controls" aria-label="Game settings">
+          <label>
+            Players
+            <select id="playersSelect">
+              <option value="2">2 players - 6 cards</option>
+              <option value="3">3 players - 5 cards</option>
+              <option value="4">4 players - 5 cards</option>
+            </select>
+          </label>
+          <fieldset>
+            <legend>Crib</legend>
+            <label><input type="radio" name="cribOwner" value="mine" checked> Mine</label>
+            <label><input type="radio" name="cribOwner" value="other"> Other</label>
+          </fieldset>
+          <div class="cutControl">
+            <label>
+              Cut card
+              <select id="starterSelect">
+                <option value="">Auto-average all cuts</option>
+              </select>
+            </label>
+            <button id="randomCutButton" type="button" title="Flip a random cut card">Cut Card</button>
+          </div>
+        </section>
+
+        <section class="selection" aria-live="polite">
+          <div>
+            <span class="label">Dealt</span>
+            <div id="dealtCards" class="dealtSlots"></div>
+          </div>
+          <div>
+            <span class="label">Cut Card</span>
+            <div id="starterCard" class="cardRow empty">No cut card selected</div>
+          </div>
+        </section>
+      </div>
+
+      <section class="results">
+        <div class="resultHeader">
+          <h2>Discard Options</h2>
+          <span id="resultMeta"></span>
+        </div>
+        <div id="summary" class="summary"></div>
+        <div class="tableWrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Keep</th>
+                <th>Discard</th>
+                <th>Hand avg</th>
+                <th>Crib avg</th>
+                <th>Net</th>
+              </tr>
+            </thead>
+            <tbody id="resultsBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <script src="script.js"></script>
+  </body>
+</html>

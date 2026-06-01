@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="760" viewBox="0 0 1180 760" role="img" aria-labelledby="title desc">
+  <title id="title">Cribbage Calculator screenshot preview</title>
+  <desc id="desc">A preview of the cribbage calculator interface with controls, dealt cards, a cut card, and discard options.</desc>
+  <rect width="1180" height="760" fill="#f7f6f2"/>
+  <g font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
+    <text x="42" y="58" font-size="34" font-weight="800" fill="#1c2420">Cribbage Calculator</text>
+    <text x="44" y="86" font-size="16" fill="#66706a">Select 6 cards, then compare 2-card discards.</text>
+    <rect x="830" y="32" width="142" height="42" rx="8" fill="#0f766e"/>
+    <text x="858" y="59" font-size="15" font-weight="700" fill="#fff">Random Deal</text>
+    <rect x="986" y="32" width="92" height="42" rx="8" fill="#fff" stroke="#d9ddd5"/>
+    <text x="1014" y="59" font-size="15" font-weight="700" fill="#1c2420">Reset</text>
+
+    <rect x="42" y="110" width="1096" height="82" rx="8" fill="#fff" stroke="#d9ddd5"/>
+    <text x="62" y="137" font-size="13" font-weight="800" fill="#66706a">Players</text>
+    <rect x="62" y="148" width="300" height="32" rx="7" fill="#fff" stroke="#d9ddd5"/>
+    <text x="76" y="170" font-size="14" fill="#1c2420">2 players - 6 cards</text>
+    <text x="390" y="137" font-size="13" font-weight="800" fill="#66706a">Crib</text>
+    <rect x="390" y="148" width="300" height="32" rx="7" fill="#fff" stroke="#d9ddd5"/>
+    <circle cx="414" cy="164" r="6" fill="#0f766e"/>
+    <text x="430" y="170" font-size="14" fill="#1c2420">Mine</text>
+    <circle cx="520" cy="164" r="6" fill="#fff" stroke="#66706a"/>
+    <text x="536" y="170" font-size="14" fill="#1c2420">Other</text>
+    <text x="720" y="137" font-size="13" font-weight="800" fill="#66706a">Cut card</text>
+    <rect x="720" y="148" width="260" height="32" rx="7" fill="#fff" stroke="#d9ddd5"/>
+    <text x="734" y="170" font-size="14" fill="#b42318">5♥</text>
+    <rect x="994" y="148" width="112" height="32" rx="7" fill="#fff" stroke="#d9ddd5"/>
+    <text x="1019" y="170" font-size="14" font-weight="700" fill="#1c2420">Cut Card</text>
+
+    <rect x="42" y="210" width="1096" height="92" rx="8" fill="#fff" stroke="#d9ddd5"/>
+    <text x="62" y="238" font-size="12" font-weight="800" fill="#66706a">DEALT</text>
+    <g font-size="15" font-weight="800">
+      <rect x="62" y="252" width="86" height="34" rx="7" fill="#fff" stroke="#d9ddd5"/>
+      <text x="88" y="275" fill="#1c2420">A♣</text>
+      <rect x="158" y="252" width="86" height="34" rx="7" fill="#fff" stroke="#d9ddd5"/>
+      <text x="184" y="275" fill="#b42318">5♦</text>
+      <rect x="254" y="252" width="86" height="34" rx="7" fill="#fff" stroke="#d9ddd5"/>
+      <text x="280" y="275" fill="#1c2420">6♠</text>
+      <rect x="350" y="252" width="86" height="34" rx="7" fill="#fff" stroke="#d9ddd5"/>
+      <text x="376" y="275" fill="#b42318">7♥</text>
+      <rect x="446" y="252" width="86" height="34" rx="7" fill="#fff" stroke="#d9ddd5"/>
+      <text x="472" y="275" fill="#1c2420">8♣</text>
+      <rect x="542" y="252" width="86" height="34" rx="7" fill="#fff" stroke="#d9ddd5"/>
+      <text x="568" y="275" fill="#1c2420">J♠</text>
+    </g>
+    <text x="744" y="238" font-size="12" font-weight="800" fill="#66706a">CUT CARD</text>
+    <rect x="744" y="252" width="58" height="34" rx="7" fill="#fff" stroke="#d9ddd5"/>
+    <text x="762" y="275" font-size="15" font-weight="800" fill="#b42318">5♥</text>
+
+    <rect x="42" y="326" width="1096" height="384" rx="8" fill="#fff" stroke="#d9ddd5"/>
+    <text x="62" y="360" font-size="20" font-weight="800" fill="#1c2420">Discard Options</text>
+    <text x="850" y="360" font-size="14" fill="#66706a">Scored with 5♥ starter</text>
+    <line x1="42" y1="378" x2="1138" y2="378" stroke="#d9ddd5"/>
+    <text x="62" y="412" font-size="15" fill="#66706a">Best discard: </text>
+    <text x="154" y="412" font-size="15" font-weight="800" fill="#1c2420">A♣ J♠</text>
+    <text x="214" y="412" font-size="15" fill="#66706a">. Expected net: </text>
+    <text x="324" y="412" font-size="15" font-weight="800" fill="#1c2420">18.82</text>
+    <line x1="42" y1="434" x2="1138" y2="434" stroke="#d9ddd5"/>
+
+    <text x="62" y="466" font-size="12" font-weight="800" fill="#66706a">KEEP</text>
+    <text x="370" y="466" font-size="12" font-weight="800" fill="#66706a">DISCARD</text>
+    <text x="620" y="466" font-size="12" font-weight="800" fill="#66706a">HAND AVG</text>
+    <text x="782" y="466" font-size="12" font-weight="800" fill="#66706a">CRIB AVG</text>
+    <text x="944" y="466" font-size="12" font-weight="800" fill="#66706a">NET</text>
+    <rect x="42" y="484" width="1096" height="54" fill="#effaf8"/>
+    <g font-size="14" font-weight="800">
+      <text x="62" y="518" fill="#b42318">5♦</text>
+      <text x="104" y="518" fill="#1c2420">6♠</text>
+      <text x="146" y="518" fill="#b42318">7♥</text>
+      <text x="188" y="518" fill="#1c2420">8♣</text>
+      <text x="370" y="518" fill="#1c2420">A♣ J♠</text>
+      <text x="620" y="518" fill="#1c2420">14.20</text>
+      <text x="782" y="518" fill="#1c2420">4.62</text>
+      <text x="944" y="518" fill="#1c2420">18.82</text>
+    </g>
+    <line x1="42" y1="538" x2="1138" y2="538" stroke="#d9ddd5"/>
+    <g font-size="14" fill="#1c2420">
+      <text x="62" y="574">A♣ 5♦ 7♥ 8♣</text>
+      <text x="370" y="574">6♠ J♠</text>
+      <text x="620" y="574" font-weight="800">12.60</text>
+      <text x="782" y="574" font-weight="800">4.88</text>
+      <text x="944" y="574" font-weight="800">17.48</text>
+      <line x1="42" y1="594" x2="1138" y2="594" stroke="#d9ddd5"/>
+      <text x="62" y="630">A♣ 5♦ 6♠ 7♥</text>
+      <text x="370" y="630">8♣ J♠</text>
+      <text x="620" y="630" font-weight="800">11.80</text>
+      <text x="782" y="630" font-weight="800">5.02</text>
+      <text x="944" y="630" font-weight="800">16.82</text>
+      <line x1="42" y1="650" x2="1138" y2="650" stroke="#d9ddd5"/>
+      <text x="62" y="686">5♦ 6♠ 7♥ J♠</text>
+      <text x="370" y="686">A♣ 8♣</text>
+      <text x="620" y="686" font-weight="800">10.20</text>
+      <text x="782" y="686" font-weight="800">4.41</text>
+      <text x="944" y="686" font-weight="800">14.61</text>
+    </g>
+  </g>
+</svg>
