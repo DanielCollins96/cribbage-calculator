@@ -28,7 +28,28 @@ const scanHandButton = document.querySelector("#scanHandButton");
 const scanHandInput = document.querySelector("#scanHandInput");
 const scanStatusEl = document.querySelector("#scanStatus");
 
-let tesseractLoadPromise = null;
+let transformersModelPromise = null;
+
+const florenceScanPrompts = [
+  "<OCR>",
+  "List every visible playing card from left to right. Use only compact codes like 7H 8C 9S 10D JC QS KH.",
+  "Identify all visible playing cards. Return only rank and suit codes using S H D C."
+];
+
+function preferredVisionDevices() {
+  return typeof navigator !== "undefined" && navigator.gpu ? ["webgpu"] : [];
+}
+
+function florenceDtype(device) {
+  if (device === "wasm") return "q4";
+
+  return {
+    embed_tokens: "fp16",
+    vision_encoder: "fp16",
+    encoder_model: "q4",
+    decoder_model_merged: "q4",
+  };
+}
 
 function dealtCount() {
   return playersSelect.value === "2" ? 6 : 5;
@@ -312,21 +333,61 @@ function setScanStatus(message, tone = "") {
   scanStatusEl.dataset.tone = tone;
 }
 
-function loadTesseract() {
-  if (window.Tesseract) return Promise.resolve(window.Tesseract);
+async function loadTransformers() {
+  if (transformersModelPromise) return transformersModelPromise;
 
-  if (!tesseractLoadPromise) {
-    tesseractLoadPromise = new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
-      script.async = true;
-      script.onload = () => resolve(window.Tesseract);
-      script.onerror = () => reject(new Error("The OCR model could not be loaded."));
-      document.head.append(script);
-    });
-  }
+  transformersModelPromise = (async () => {
+    const {
+      Florence2ForConditionalGeneration,
+      AutoProcessor,
+      AutoTokenizer,
+      RawImage,
+      env
+    } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2");
 
-  return tesseractLoadPromise;
+    env.allowLocalModels = false;
+    env.useBrowserCache = typeof caches !== "undefined";
+
+    const modelId = "onnx-community/Florence-2-base-ft";
+    let model = null;
+    let device = "";
+    let lastError = null;
+    const progressCallback = (p) => {
+      if (p.status === "progress") {
+        setScanStatus(`Downloading model: ${p.progress.toFixed(1)}%`);
+      }
+    };
+
+    const devices = preferredVisionDevices();
+    if (devices.length === 0) {
+      throw new Error("Photo scan needs WebGPU on this static version. Select cards manually or add a server-side scanner.");
+    }
+
+    for (const candidate of devices) {
+      try {
+        device = candidate;
+        setScanStatus(`Loading Vision Model with ${candidate.toUpperCase()}...`);
+        model = await Florence2ForConditionalGeneration.from_pretrained(modelId, {
+          device: candidate,
+          dtype: florenceDtype(candidate),
+          progress_callback: progressCallback
+        });
+        break;
+      } catch (error) {
+        lastError = error;
+        throw error;
+      }
+    }
+
+    if (!model) throw lastError || new Error("The vision model could not be loaded.");
+
+    const processor = await AutoProcessor.from_pretrained(modelId);
+    const tokenizer = await AutoTokenizer.from_pretrained(modelId);
+
+    return { model, processor, tokenizer, RawImage, device };
+  })();
+
+  return transformersModelPromise;
 }
 
 async function prepareScanImage(file) {
@@ -339,24 +400,39 @@ async function prepareScanImage(file) {
 
   const context = canvas.getContext("2d");
   context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  if (bitmap.close) bitmap.close();
 
-  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-  const { data } = imageData;
-  for (let index = 0; index < data.length; index += 4) {
-    const gray = data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
-    const contrast = Math.max(0, Math.min(255, (gray - 128) * 1.45 + 128));
-    data[index] = contrast;
-    data[index + 1] = contrast;
-    data[index + 2] = contrast;
-  }
-  context.putImageData(imageData, 0, 0);
+  return canvas;
+}
 
-  return canvas.toDataURL("image/png");
+function cropCanvas(source, x, y, width, height) {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(width);
+  canvas.height = Math.round(height);
+  const context = canvas.getContext("2d");
+  context.drawImage(source, x, y, width, height, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+function scanImageVariants(canvas) {
+  return [
+    { label: "full image", canvas },
+    {
+      label: "card indexes",
+      canvas: cropCanvas(canvas, 0, 0, canvas.width, Math.max(1, canvas.height * 0.68))
+    }
+  ];
 }
 
 function normalizeRank(rank) {
   const normalized = rank.toUpperCase().trim();
-  if (["T", "10", "1O", "IO", "I0"].includes(normalized)) return "10";
+  const map = {
+    "ACE": "A", "TWO": "2", "THREE": "3", "FOUR": "4", "FIVE": "5",
+    "SIX": "6", "SEVEN": "7", "EIGHT": "8", "NINE": "9",
+    "TEN": "10", "JACK": "J", "QUEEN": "Q", "KING": "K",
+    "T": "10", "1O": "10", "IO": "10", "I0": "10", "10": "10"
+  };
+  if (map[normalized]) return map[normalized];
   if (ranks.includes(normalized)) return normalized;
   return "";
 }
@@ -408,7 +484,7 @@ function parseScannedCards(rawText) {
     .replace(/[♤♠]/g, " S ")
     .replace(/\b(?:10|1O|IO|I0)\b/g, " T ")
     .replace(/[^A-Z0-9]+/g, " ");
-  const tokens = tokenText.match(/\b(?:T|[A2-9JQK]|[SHDC])\b/g) || [];
+  const tokens = tokenText.match(/\b(?:T|[A2-9JQK]|[SHDC]|ACE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|JACK|QUEEN|KING)\b/g) || [];
   let pendingRank = "";
 
   for (const token of tokens) {
@@ -425,31 +501,71 @@ function parseScannedCards(rawText) {
   return cards;
 }
 
-async function recognizeCardsFromImage(file) {
-  const tesseract = await loadTesseract();
-  const image = await prepareScanImage(file);
-  const worker = await tesseract.createWorker("eng", 1, {
-    workerPath: "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js",
-    langPath: "https://tessdata.projectnaptha.com/4.0.0",
-    corePath: "https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1",
-    logger: (progress) => {
-      if (progress.status === "recognizing text" && progress.progress) {
-        setScanStatus(`Reading cards... ${Math.round(progress.progress * 100)}%`);
-      }
+function mergeScannedCards(cardGroups) {
+  const cards = [];
+  const seen = new Set();
+
+  for (const group of cardGroups) {
+    for (const card of group) {
+      if (seen.has(card.id)) continue;
+      seen.add(card.id);
+      cards.push(card);
     }
+  }
+
+  return cards;
+}
+
+function florenceOutputText(result, prompt, generatedText) {
+  const value = result[prompt];
+  if (typeof value === "string") return value;
+  if (value && Array.isArray(value.labels)) return value.labels.join(" ");
+  return generatedText;
+}
+
+async function runFlorenceScanPrompt(model, processor, tokenizer, image, prompt) {
+  const visionInputs = await processor(image);
+  const prompts = processor.construct_prompts(prompt);
+  const textInputs = tokenizer(prompts);
+  const generatedIds = await model.generate({
+    ...textInputs,
+    ...visionInputs,
+    max_new_tokens: 96
   });
+  const generatedText = tokenizer.batch_decode(generatedIds, {
+    skip_special_tokens: false
+  })[0];
+  const result = processor.post_process_generation(generatedText, prompt, image.size);
+  const text = florenceOutputText(result, prompt, generatedText);
+  console.info("Scan model output", { prompt, text });
+  return parseScannedCards(text);
+}
+
+async function recognizeCardsFromImage(file) {
+  const { model, processor, tokenizer, RawImage, device } = await loadTransformers();
+  const canvas = await prepareScanImage(file);
+
+  setScanStatus(`Analyzing image with ${device.toUpperCase()}...`);
 
   try {
-    await worker.setParameters({
-      preserve_interword_spaces: "1",
-      tessedit_pageseg_mode: "11",
-      tessedit_char_whitelist: "A23456789JQKT10SHDC♥♡♦♢♣♧♠♤"
-    });
-    const result = await worker.recognize(image);
-    const wordText = (result.data.words || []).map((word) => word.text).join(" ");
-    return parseScannedCards(`${result.data.text}\n${wordText}`);
-  } finally {
-    await worker.terminate();
+    const scans = [];
+    const variants = scanImageVariants(canvas);
+    const total = variants.length * florenceScanPrompts.length;
+    let completed = 0;
+
+    for (const variant of variants) {
+      const image = RawImage.fromCanvas(variant.canvas);
+      for (const prompt of florenceScanPrompts) {
+        completed += 1;
+        setScanStatus(`Analyzing ${variant.label}... ${completed}/${total}`);
+        scans.push(await runFlorenceScanPrompt(model, processor, tokenizer, image, prompt));
+      }
+    }
+
+    return mergeScannedCards(scans);
+  } catch (e) {
+    console.error(e);
+    throw new Error(e.message || "VLM inference failed.");
   }
 }
 
@@ -457,7 +573,7 @@ async function scanHand(file) {
   if (!file) return;
 
   scanHandButton.disabled = true;
-  setScanStatus("Loading OCR model...");
+  setScanStatus("Loading Vision Model (~230MB)...");
 
   try {
     const scannedCards = await recognizeCardsFromImage(file);
