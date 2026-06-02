@@ -79,7 +79,8 @@ p,
 
 #resetButton,
 #randomDealButton,
-#randomCutButton {
+#randomCutButton,
+.scanButton {
   border: 1px solid var(--line);
   background: var(--panel);
   border-radius: 8px;
@@ -103,7 +104,8 @@ p,
   white-space: nowrap;
 }
 
-#randomCutButton:disabled {
+#randomCutButton:disabled,
+.scanButton:disabled {
   cursor: not-allowed;
   opacity: 0.48;
 }
@@ -186,13 +188,59 @@ fieldset label {
   margin-bottom: 12px;
 }
 
+.selectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
 .label {
   display: block;
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0;
-  margin-bottom: 8px;
   text-transform: uppercase;
+}
+
+.selection > div > .label {
+  margin-bottom: 8px;
+}
+
+.scanButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 8px 12px;
+  white-space: nowrap;
+}
+
+.scanButton svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.scanStatus {
+  min-height: 20px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.scanStatus[data-tone="error"] {
+  color: var(--red);
+}
+
+.scanStatus:empty {
+  display: none;
 }
 
 .cardRow {

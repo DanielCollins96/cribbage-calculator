@@ -47,8 +47,19 @@
 
         <section class="selection" aria-live="polite">
           <div>
-            <span class="label">Dealt</span>
+            <div class="selectionHeader">
+              <span class="label">Dealt</span>
+              <button id="scanHandButton" class="scanButton" type="button" title="Scan dealt cards from a photo">
+                <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                  <path d="M14.5 5 13 3H7L5.5 5H3v15h18V5h-6.5Z"></path>
+                  <circle cx="12" cy="12.5" r="4"></circle>
+                </svg>
+                Scan hand
+              </button>
+              <input id="scanHandInput" type="file" accept="image/*" capture="environment" hidden>
+            </div>
             <div id="dealtCards" class="dealtSlots"></div>
+            <div id="scanStatus" class="scanStatus" role="status" aria-live="polite"></div>
           </div>
           <div>
             <span class="label">Cut Card</span>

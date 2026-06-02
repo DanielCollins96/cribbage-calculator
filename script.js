@@ -24,6 +24,11 @@ const resultMetaEl = document.querySelector("#resultMeta");
 const dealHintEl = document.querySelector("#dealHint");
 const randomDealButton = document.querySelector("#randomDealButton");
 const randomCutButton = document.querySelector("#randomCutButton");
+const scanHandButton = document.querySelector("#scanHandButton");
+const scanHandInput = document.querySelector("#scanHandInput");
+const scanStatusEl = document.querySelector("#scanStatus");
+
+let tesseractLoadPromise = null;
 
 function dealtCount() {
   return playersSelect.value === "2" ? 6 : 5;
@@ -302,6 +307,186 @@ function randomCut() {
   update();
 }
 
+function setScanStatus(message, tone = "") {
+  scanStatusEl.textContent = message;
+  scanStatusEl.dataset.tone = tone;
+}
+
+function loadTesseract() {
+  if (window.Tesseract) return Promise.resolve(window.Tesseract);
+
+  if (!tesseractLoadPromise) {
+    tesseractLoadPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+      script.async = true;
+      script.onload = () => resolve(window.Tesseract);
+      script.onerror = () => reject(new Error("The OCR model could not be loaded."));
+      document.head.append(script);
+    });
+  }
+
+  return tesseractLoadPromise;
+}
+
+async function prepareScanImage(file) {
+  const bitmap = await createImageBitmap(file);
+  const maxEdge = 1800;
+  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+
+  const context = canvas.getContext("2d");
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const { data } = imageData;
+  for (let index = 0; index < data.length; index += 4) {
+    const gray = data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
+    const contrast = Math.max(0, Math.min(255, (gray - 128) * 1.45 + 128));
+    data[index] = contrast;
+    data[index + 1] = contrast;
+    data[index + 2] = contrast;
+  }
+  context.putImageData(imageData, 0, 0);
+
+  return canvas.toDataURL("image/png");
+}
+
+function normalizeRank(rank) {
+  const normalized = rank.toUpperCase().trim();
+  if (["T", "10", "1O", "IO", "I0"].includes(normalized)) return "10";
+  if (ranks.includes(normalized)) return normalized;
+  return "";
+}
+
+function normalizeSuit(suit) {
+  const normalized = suit.toUpperCase();
+  if (["S", "SPADE", "SPADES", "♠", "♤"].includes(normalized)) return "S";
+  if (["H", "HEART", "HEARTS", "♥", "♡"].includes(normalized)) return "H";
+  if (["D", "DIAMOND", "DIAMONDS", "♦", "♢"].includes(normalized)) return "D";
+  if (["C", "CLUB", "CLUBS", "♣", "♧"].includes(normalized)) return "C";
+  return "";
+}
+
+function addScannedCard(cards, seen, rank, suit) {
+  const id = `${rank}${suit}`;
+  if (!getCard(id) || seen.has(id)) return;
+  seen.add(id);
+  cards.push(getCard(id));
+}
+
+function parseScannedCards(rawText) {
+  const directText = rawText
+    .toUpperCase()
+    .replace(/[♡♥]/g, "H")
+    .replace(/[♢♦]/g, "D")
+    .replace(/[♧♣]/g, "C")
+    .replace(/[♤♠]/g, "S")
+    .replace(/\b(?:1O|IO|I0)\b/g, "T")
+    .replace(/10/g, "T");
+  const cards = [];
+  const seen = new Set();
+  const directMatches = directText.matchAll(/\b(T|[A2-9JQK])\s*([SHDC])\b|\b([SHDC])\s*(T|[A2-9JQK])\b/g);
+
+  for (const match of directMatches) {
+    const rank = normalizeRank(match[1] || match[4]);
+    const suit = normalizeSuit(match[2] || match[3]);
+    addScannedCard(cards, seen, rank, suit);
+  }
+
+  const tokenText = rawText
+    .toUpperCase()
+    .replace(/SPADES?/g, " S ")
+    .replace(/HEARTS?/g, " H ")
+    .replace(/DIAMONDS?/g, " D ")
+    .replace(/CLUBS?/g, " C ")
+    .replace(/[♡♥]/g, " H ")
+    .replace(/[♢♦]/g, " D ")
+    .replace(/[♧♣]/g, " C ")
+    .replace(/[♤♠]/g, " S ")
+    .replace(/\b(?:10|1O|IO|I0)\b/g, " T ")
+    .replace(/[^A-Z0-9]+/g, " ");
+  const tokens = tokenText.match(/\b(?:T|[A2-9JQK]|[SHDC])\b/g) || [];
+  let pendingRank = "";
+
+  for (const token of tokens) {
+    const rank = normalizeRank(token);
+    const suit = normalizeSuit(token);
+    if (rank) {
+      pendingRank = rank;
+    } else if (suit && pendingRank) {
+      addScannedCard(cards, seen, pendingRank, suit);
+      pendingRank = "";
+    }
+  }
+
+  return cards;
+}
+
+async function recognizeCardsFromImage(file) {
+  const tesseract = await loadTesseract();
+  const image = await prepareScanImage(file);
+  const worker = await tesseract.createWorker("eng", 1, {
+    workerPath: "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js",
+    langPath: "https://tessdata.projectnaptha.com/4.0.0",
+    corePath: "https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1",
+    logger: (progress) => {
+      if (progress.status === "recognizing text" && progress.progress) {
+        setScanStatus(`Reading cards... ${Math.round(progress.progress * 100)}%`);
+      }
+    }
+  });
+
+  try {
+    await worker.setParameters({
+      preserve_interword_spaces: "1",
+      tessedit_pageseg_mode: "11",
+      tessedit_char_whitelist: "A23456789JQKT10SHDC♥♡♦♢♣♧♠♤"
+    });
+    const result = await worker.recognize(image);
+    const wordText = (result.data.words || []).map((word) => word.text).join(" ");
+    return parseScannedCards(`${result.data.text}\n${wordText}`);
+  } finally {
+    await worker.terminate();
+  }
+}
+
+async function scanHand(file) {
+  if (!file) return;
+
+  scanHandButton.disabled = true;
+  setScanStatus("Loading OCR model...");
+
+  try {
+    const scannedCards = await recognizeCardsFromImage(file);
+    const need = dealtCount();
+    selected = scannedCards.slice(0, need).map((card) => card.id);
+    while (selected.length < need) selected.push("");
+    starterSelect.value = "";
+    update();
+
+    if (scannedCards.length === 0) {
+      setScanStatus("No cards found. Try a brighter, straighter photo.", "error");
+      return;
+    }
+
+    const scannedLabels = scannedCards.slice(0, need).map(cardLabel).join(" ");
+    if (scannedCards.length >= need) {
+      setScanStatus(`Scanned ${need} cards: ${scannedLabels}.`);
+    } else {
+      const remaining = need - scannedCards.length;
+      setScanStatus(`Scanned ${scannedCards.length} card${scannedCards.length === 1 ? "" : "s"}: ${scannedLabels}. Choose ${remaining} more manually.`);
+    }
+  } catch (error) {
+    setScanStatus(error.message || "Scan failed. Try another photo.", "error");
+  } finally {
+    scanHandButton.disabled = false;
+    scanHandInput.value = "";
+  }
+}
+
 function update() {
   const need = dealtCount();
   const discardNeed = discardCount();
@@ -396,9 +581,12 @@ starterSelect.addEventListener("change", update);
 cribInputs.forEach((input) => input.addEventListener("change", update));
 randomDealButton.addEventListener("click", randomDeal);
 randomCutButton.addEventListener("click", randomCut);
+scanHandButton.addEventListener("click", () => scanHandInput.click());
+scanHandInput.addEventListener("change", () => scanHand(scanHandInput.files[0]));
 document.querySelector("#resetButton").addEventListener("click", () => {
   selected = Array(dealtCount()).fill("");
   starterSelect.value = "";
+  setScanStatus("");
   update();
 });
 
