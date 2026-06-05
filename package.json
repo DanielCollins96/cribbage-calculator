@@ -1,0 +1,19 @@
+{
+  "name": "cribbage-calculator",
+  "version": "1.0.0",
+  "description": "A quick browser-based cribbage hand calculator for comparing discard choices. It runs as a static page, so there is no install or build step.",
+  "main": "script.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "node --check script.js",
+    "dev": "vite --host 0.0.0.0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "vite": "^8.0.16"
+  }
+}
