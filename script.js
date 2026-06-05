@@ -8,8 +8,10 @@ const deck = suits.flatMap((suit) => ranks.map((rank, index) => ({
   order: index + 1,
   value: Math.min(index + 1, 10)
 })));
+const cardById = new Map(deck.map((card) => [card.id, card]));
 
 let selected = [];
+let resultRenderToken = 0;
 const scoreRankCounts = new Int8Array(14);
 
 const deckEl = document.querySelector("#deck");
@@ -65,7 +67,11 @@ function isRed(card) {
 }
 
 function getCard(id) {
-  return deck.find((card) => card.id === id);
+  return cardById.get(id);
+}
+
+function yieldToBrowser() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function combinations(items, size) {
@@ -160,7 +166,7 @@ function averageHand(keep, remainingDeck, fixedStarter) {
   return total / remainingDeck.length;
 }
 
-function averageCrib(discard, remainingDeck, fixedStarter) {
+async function averageCribAsync(discard, remainingDeck, fixedStarter, shouldContinue) {
   const fillCount = 4 - discard.length;
   let total = 0;
   let iterations = 0;
@@ -169,9 +175,16 @@ function averageCrib(discard, remainingDeck, fixedStarter) {
     cribHand[index] = discard[index];
   }
 
-  function scoreStarter(starter) {
+  async function maybeYield() {
+    if (iterations % 5000 !== 0) return true;
+    await yieldToBrowser();
+    return shouldContinue();
+  }
+
+  async function scoreStarter(starter) {
     if (fillCount === 2) {
       for (let first = 0; first < remainingDeck.length - 1; first += 1) {
+        if (!shouldContinue()) return false;
         if (remainingDeck[first].id === starter.id) continue;
         cribHand[discard.length] = remainingDeck[first];
         for (let second = first + 1; second < remainingDeck.length; second += 1) {
@@ -179,12 +192,14 @@ function averageCrib(discard, remainingDeck, fixedStarter) {
           cribHand[discard.length + 1] = remainingDeck[second];
           total += scoreFiveCards(cribHand, starter, true);
           iterations += 1;
+          if (!(await maybeYield())) return false;
         }
       }
-      return;
+      return true;
     }
 
     for (let first = 0; first < remainingDeck.length - 2; first += 1) {
+      if (!shouldContinue()) return false;
       if (remainingDeck[first].id === starter.id) continue;
       cribHand[discard.length] = remainingDeck[first];
       for (let second = first + 1; second < remainingDeck.length - 1; second += 1) {
@@ -195,16 +210,19 @@ function averageCrib(discard, remainingDeck, fixedStarter) {
           cribHand[discard.length + 2] = remainingDeck[third];
           total += scoreFiveCards(cribHand, starter, true);
           iterations += 1;
+          if (!(await maybeYield())) return false;
         }
       }
     }
+    return true;
   }
 
   if (fixedStarter) {
-    scoreStarter(fixedStarter);
+    if (!(await scoreStarter(fixedStarter))) return null;
   } else {
     for (let index = 0; index < remainingDeck.length; index += 1) {
-      scoreStarter(remainingDeck[index]);
+      if (!shouldContinue()) return null;
+      if (!(await scoreStarter(remainingDeck[index]))) return null;
     }
   }
 
@@ -215,10 +233,11 @@ function renderDeck() {
   if (!deckEl) return;
 
   const fragment = document.createDocumentFragment();
+  const selectedIds = new Set(selected.filter(Boolean));
   deck.forEach((card) => {
     const button = document.createElement("button");
     button.type = "button";
-    const isSelected = selected.includes(card.id);
+    const isSelected = selectedIds.has(card.id);
     button.className = `cardButton ${isRed(card) ? "red" : ""} ${isSelected ? "selected" : ""}`;
     button.textContent = cardLabel(card);
     button.title = isSelected ? "Remove card" : "Add card";
@@ -230,20 +249,22 @@ function renderDeck() {
 
 function renderStarterOptions() {
   const current = starterSelect.value;
+  const selectedIds = new Set(selected.filter(Boolean));
   starterSelect.replaceChildren();
   const defaultOpt = new Option("Auto-average all cuts", "");
   starterSelect.add(defaultOpt);
 
-  deck.filter((card) => !selected.includes(card.id)).forEach((card) => {
+  deck.filter((card) => !selectedIds.has(card.id)).forEach((card) => {
     starterSelect.add(new Option(cardLabel(card), card.id));
   });
 
-  const stillValid = deck.some((card) => card.id === current && !selected.includes(current));
+  const stillValid = deck.some((card) => card.id === current && !selectedIds.has(current));
   starterSelect.value = stillValid ? current : "";
 }
 
 function renderDealtSelectors() {
   const need = dealtCount();
+  const selectedIds = new Set(selected.filter(Boolean));
   dealtCardsEl.replaceChildren();
   const fragment = document.createDocumentFragment();
   dealtCardsEl.classList.toggle("empty", false);
@@ -257,7 +278,7 @@ function renderDealtSelectors() {
     select.add(new Option(`Card ${index + 1}`, ""));
 
     deck
-      .filter((card) => card.id === current || !selected.includes(card.id))
+      .filter((card) => card.id === current || !selectedIds.has(card.id))
       .forEach((card) => {
         const option = new Option(cardLabel(card), card.id);
         if (isRed(card)) option.className = "red";
@@ -300,14 +321,14 @@ function toggleCard(id) {
 }
 
 function randomDeal() {
+  const need = dealtCount();
   const shuffled = [...deck];
   for (let index = shuffled.length - 1; index > 0; index -= 1) {
     const swapIndex = Math.floor(Math.random() * (index + 1));
     [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
   }
 
-  playersSelect.value = "2";
-  selected = shuffled.slice(0, 6).map((card) => card.id);
+  selected = shuffled.slice(0, need).map((card) => card.id);
   starterSelect.value = "";
   update();
 }
@@ -324,6 +345,12 @@ function randomCut() {
 function setScanStatus(message, tone = "") {
   scanStatusEl.textContent = message;
   scanStatusEl.dataset.tone = tone;
+}
+
+function progressText(label, percent) {
+  const width = 20;
+  const filled = Math.round((percent / 100) * width);
+  return `${label}: ${percent}% [${"=".repeat(filled)}${"-".repeat(width - filled)}]`;
 }
 
 function loadScript(src) {
@@ -345,21 +372,72 @@ function loadScript(src) {
   });
 }
 
+async function downloadModelWithProgress(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`The card detector model could not be loaded (${response.status}).`);
+  }
+
+  const total = Number(response.headers.get("content-length"));
+  if (!response.body || !total) {
+    setScanStatus("Downloading card detector model...");
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
+  let lastPercent = -1;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    const percent = Math.min(100, Math.floor((received / total) * 100));
+    if (percent !== lastPercent) {
+      lastPercent = percent;
+      setScanStatus(progressText("Downloading card detector model", percent));
+      await yieldToBrowser();
+    }
+  }
+
+  const model = new Uint8Array(received);
+  let offset = 0;
+  chunks.forEach((chunk) => {
+    model.set(chunk, offset);
+    offset += chunk.length;
+  });
+  return model;
+}
+
 async function loadYoloModel() {
   if (yoloModelPromise) return yoloModelPromise;
 
   yoloModelPromise = (async () => {
-    setScanStatus("Loading card detector...");
+    setScanStatus("Loading card detector runtime...");
     await loadScript("https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js");
     window.ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/";
     window.ort.env.wasm.numThreads = 1;
 
-    const session = await window.ort.InferenceSession.create(yoloModelPath, {
+    let model = yoloModelPath;
+    try {
+      model = await downloadModelWithProgress(yoloModelPath);
+    } catch (error) {
+      setScanStatus("Loading card detector model...");
+    }
+
+    setScanStatus("Initializing card detector...");
+    const session = await window.ort.InferenceSession.create(model, {
       executionProviders: ["wasm"]
     });
 
+    setScanStatus("Card detector ready.");
     return { session, labels: yoloLabels };
   })();
+  yoloModelPromise.catch(() => {
+    yoloModelPromise = null;
+  });
 
   return yoloModelPromise;
 }
@@ -621,6 +699,8 @@ async function scanHand(file) {
 }
 
 function update() {
+  const token = resultRenderToken + 1;
+  resultRenderToken = token;
   const need = dealtCount();
   const discardNeed = discardCount();
   selected = selected.slice(0, need);
@@ -634,10 +714,15 @@ function update() {
   randomCutButton.disabled = selectedCards.length !== need;
   renderDealtSelectors();
   renderCardRow(starterCardEl, starter ? [starter] : [], "No cut card selected");
-  renderResults(selectedCards, starter);
+  renderResults(selectedCards, starter, token).catch((error) => {
+    if (token !== resultRenderToken) return;
+    summaryEl.textContent = error.message || "Could not score discard options.";
+    resultMetaEl.textContent = "";
+  });
 }
 
-function renderResults(selectedCards, starter) {
+async function renderResults(selectedCards, starter, token) {
+  const shouldContinue = () => token === resultRenderToken;
   resultsBody.replaceChildren();
 
   if (selectedCards.length !== dealtCount()) {
@@ -646,58 +731,98 @@ function renderResults(selectedCards, starter) {
     return;
   }
 
+  summaryEl.textContent = "Calculating discard options...";
+  resultMetaEl.textContent = "Scoring 0%";
+  await yieldToBrowser();
+  if (!shouldContinue()) return;
+
   const selectedIds = new Set(selectedCards.map((card) => card.id));
   const remainingDeck = deck.filter((card) => !selectedIds.has(card.id));
-  const discards = combinations(selectedCards, discardCount());
-  const rows = discards.map((discard) => {
+  const owner = cribOwner();
+  const candidates = combinations(selectedCards, discardCount()).map((discard) => {
     const discardIds = new Set(discard.map((card) => card.id));
     const keep = selectedCards.filter((card) => !discardIds.has(card.id));
     const cutDeck = starter ? remainingDeck.filter((card) => card.id !== starter.id) : remainingDeck;
     const handAvg = averageHand(keep, remainingDeck, starter);
-    const cribAvg = averageCrib(discard, cutDeck, starter);
-    const net = cribOwner() === "mine" ? handAvg + cribAvg : handAvg - cribAvg;
-    return { keep, discard, handAvg, cribAvg, net };
-  }).sort((a, b) => b.net - a.net);
+    return { keep, discard, cutDeck, handAvg };
+  }).sort((a, b) => b.handAvg - a.handAvg);
+  const rows = [];
 
-  const best = rows[0];
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    const cribAvg = await averageCribAsync(candidate.discard, candidate.cutDeck, starter, shouldContinue);
+    if (!shouldContinue() || cribAvg === null) return;
+    const net = owner === "mine" ? candidate.handAvg + cribAvg : candidate.handAvg - cribAvg;
+    rows.push({
+      keep: candidate.keep,
+      discard: candidate.discard,
+      handAvg: candidate.handAvg,
+      cribAvg,
+      net
+    });
+    rows.sort((a, b) => b.net - a.net);
+
+    const isDone = rows.length === candidates.length;
+    renderResultSummary(rows[0], isDone);
+    renderResultRows(rows);
+    const progress = Math.round((rows.length / candidates.length) * 100);
+    resultMetaEl.textContent = isDone
+      ? resultMetaText(starter)
+      : `Showing top ${Math.min(3, rows.length)} so far. Scoring ${progress}%`;
+    await yieldToBrowser();
+    if (!shouldContinue()) return;
+  }
+}
+
+function renderResultSummary(best, isFinal) {
   summaryEl.replaceChildren();
-  summaryEl.append("Best discard: ");
+  summaryEl.append(isFinal ? "Best discard: " : "Best so far: ");
   const strongDiscard = document.createElement("strong");
   strongDiscard.textContent = best.discard.map(cardLabel).join(" ");
   summaryEl.append(strongDiscard, ". Expected net: ");
   const strongNet = document.createElement("strong");
   strongNet.textContent = best.net.toFixed(2);
   summaryEl.append(strongNet, ".");
+}
 
-  resultMetaEl.textContent = starter ? `Scored with ${cardLabel(starter)} starter` : "Averaged across all possible starters";
+function resultMetaText(starter) {
+  return starter ? `Scored with ${cardLabel(starter)} starter` : "Averaged across all possible starters";
+}
+
+function renderResultRows(rows) {
+  resultsBody.replaceChildren();
 
   const fragment = document.createDocumentFragment();
   rows.forEach((row) => {
-    const tr = document.createElement("tr");
-
-    const tdKeep = document.createElement("td");
-    tdKeep.append(...formatCards(row.keep));
-
-    const tdDiscard = document.createElement("td");
-    tdDiscard.append(...formatCards(row.discard));
-
-    tr.append(tdKeep);
-    tr.append(tdDiscard);
-
-    const handAvgTd = document.createElement("td");
-    handAvgTd.className = "score";
-    handAvgTd.textContent = row.handAvg.toFixed(2);
-    const cribAvgTd = document.createElement("td");
-    cribAvgTd.className = "score";
-    cribAvgTd.textContent = row.cribAvg.toFixed(2);
-    const netTd = document.createElement("td");
-    netTd.className = "score";
-    netTd.textContent = row.net.toFixed(2);
-
-    tr.append(handAvgTd, cribAvgTd, netTd);
-    fragment.append(tr);
+    fragment.append(createResultRow(row));
   });
   resultsBody.appendChild(fragment);
+}
+
+function createResultRow(row) {
+  const tr = document.createElement("tr");
+
+  const tdKeep = document.createElement("td");
+  tdKeep.append(...formatCards(row.keep));
+
+  const tdDiscard = document.createElement("td");
+  tdDiscard.append(...formatCards(row.discard));
+
+  tr.append(tdKeep);
+  tr.append(tdDiscard);
+
+  const handAvgTd = document.createElement("td");
+  handAvgTd.className = "score";
+  handAvgTd.textContent = row.handAvg.toFixed(2);
+  const cribAvgTd = document.createElement("td");
+  cribAvgTd.className = "score";
+  cribAvgTd.textContent = row.cribAvg.toFixed(2);
+  const netTd = document.createElement("td");
+  netTd.className = "score";
+  netTd.textContent = row.net.toFixed(2);
+
+  tr.append(handAvgTd, cribAvgTd, netTd);
+  return tr;
 }
 
 function formatCards(cards) {
@@ -724,3 +849,8 @@ document.querySelector("#resetButton").addEventListener("click", () => {
 });
 
 update();
+window.addEventListener("load", () => {
+  loadYoloModel().catch((error) => {
+    setScanStatus(error.message || "Card detector failed to load.", "error");
+  });
+});
