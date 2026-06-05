@@ -3,8 +3,52 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Cribbage Calculator</title>
+    <title>Cribbage Calculator - Find the Best Discard | CribbageCalc.com</title>
+    <meta name="description" content="Free cribbage discard calculator for 2, 3, and 4 player games. Compare every keep and discard option by hand average, crib average, net score, and cut card.">
+    <meta name="robots" content="index,follow">
+    <meta name="theme-color" content="#0f766e">
+    <link rel="canonical" href="https://cribbagecalc.com/">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="CribbageCalc.com">
+    <meta property="og:title" content="Cribbage Calculator - Find the Best Discard">
+    <meta property="og:description" content="Compare cribbage discard choices by expected hand score, crib value, net points, and optional cut card.">
+    <meta property="og:url" content="https://cribbagecalc.com/">
+    <meta property="og:image" content="https://cribbagecalc.com/docs/social-preview.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Cribbage Calculator - Find the Best Discard">
+    <meta name="twitter:description" content="Free cribbage discard calculator for 2, 3, and 4 player games.">
+    <meta name="twitter:image" content="https://cribbagecalc.com/docs/social-preview.png">
     <link rel="stylesheet" href="styles.css">
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://cribbagecalc.com/#website",
+            "url": "https://cribbagecalc.com/",
+            "name": "CribbageCalc.com",
+            "description": "A free cribbage calculator for comparing discard choices and expected cribbage hand value.",
+            "inLanguage": "en"
+          },
+          {
+            "@type": "SoftwareApplication",
+            "@id": "https://cribbagecalc.com/#app",
+            "name": "Cribbage Calculator",
+            "applicationCategory": "GameApplication",
+            "operatingSystem": "Any",
+            "url": "https://cribbagecalc.com/",
+            "isAccessibleForFree": true,
+            "description": "Browser-based cribbage discard calculator that compares hand average, crib average, net score, and cut card outcomes for 2, 3, and 4 player cribbage.",
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD"
+            }
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
     <main class="app">
@@ -12,7 +56,7 @@
         <section class="toolbar">
           <div>
             <h1>Cribbage Calculator</h1>
-            <p id="dealHint">Select 6 cards for a 2-player deal.</p>
+            <p id="dealHint">Choose your dealt cards to compare discard options.</p>
           </div>
           <div class="toolbarActions">
             <button id="randomDealButton" type="button" title="Deal 6 random cards">Random Deal</button>

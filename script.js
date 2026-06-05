@@ -724,7 +724,7 @@ function update() {
   while (selected.length < need) selected.push("");
   const selectedCards = selected.map(getCard).filter(Boolean);
 
-  dealHintEl.textContent = `Select ${need} cards, then compare ${discardNeed}-card discards.`;
+  dealHintEl.textContent = `Choose ${need} dealt cards to compare ${discardNeed}-card discards.`;
   renderDeck();
   renderStarterOptions();
   const starter = starterSelect.value ? getCard(starterSelect.value) : null;
