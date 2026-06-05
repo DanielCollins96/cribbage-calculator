@@ -333,6 +333,8 @@ fieldset label {
 }
 
 .summary {
+  display: grid;
+  gap: 10px;
   padding: 14px;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
@@ -340,6 +342,25 @@ fieldset label {
 
 .summary strong {
   color: var(--ink);
+}
+
+.cutInsight {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.cutPill {
+  min-height: 28px;
+}
+
+.cutScore {
+  margin-right: 8px;
+  color: var(--ink);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
 }
 
 .tableWrap {

@@ -170,6 +170,7 @@ async function averageCribAsync(discard, remainingDeck, fixedStarter, shouldCont
   const fillCount = 4 - discard.length;
   let total = 0;
   let iterations = 0;
+  const cutScores = [];
   const cribHand = Array(4);
   for (let index = 0; index < discard.length; index += 1) {
     cribHand[index] = discard[index];
@@ -182,9 +183,12 @@ async function averageCribAsync(discard, remainingDeck, fixedStarter, shouldCont
   }
 
   async function scoreStarter(starter) {
+    const starterTotal = total;
+    const starterIterations = iterations;
+
     if (fillCount === 2) {
       for (let first = 0; first < remainingDeck.length - 1; first += 1) {
-        if (!shouldContinue()) return false;
+        if (!shouldContinue()) return null;
         if (remainingDeck[first].id === starter.id) continue;
         cribHand[discard.length] = remainingDeck[first];
         for (let second = first + 1; second < remainingDeck.length; second += 1) {
@@ -192,14 +196,17 @@ async function averageCribAsync(discard, remainingDeck, fixedStarter, shouldCont
           cribHand[discard.length + 1] = remainingDeck[second];
           total += scoreFiveCards(cribHand, starter, true);
           iterations += 1;
-          if (!(await maybeYield())) return false;
+          if (!(await maybeYield())) return null;
         }
       }
-      return true;
+      return {
+        starter,
+        cribAvg: (total - starterTotal) / (iterations - starterIterations)
+      };
     }
 
     for (let first = 0; first < remainingDeck.length - 2; first += 1) {
-      if (!shouldContinue()) return false;
+      if (!shouldContinue()) return null;
       if (remainingDeck[first].id === starter.id) continue;
       cribHand[discard.length] = remainingDeck[first];
       for (let second = first + 1; second < remainingDeck.length - 1; second += 1) {
@@ -210,23 +217,33 @@ async function averageCribAsync(discard, remainingDeck, fixedStarter, shouldCont
           cribHand[discard.length + 2] = remainingDeck[third];
           total += scoreFiveCards(cribHand, starter, true);
           iterations += 1;
-          if (!(await maybeYield())) return false;
+          if (!(await maybeYield())) return null;
         }
       }
     }
-    return true;
+    return {
+      starter,
+      cribAvg: (total - starterTotal) / (iterations - starterIterations)
+    };
   }
 
   if (fixedStarter) {
-    if (!(await scoreStarter(fixedStarter))) return null;
+    const cutScore = await scoreStarter(fixedStarter);
+    if (!cutScore) return null;
+    cutScores.push(cutScore);
   } else {
     for (let index = 0; index < remainingDeck.length; index += 1) {
       if (!shouldContinue()) return null;
-      if (!(await scoreStarter(remainingDeck[index]))) return null;
+      const cutScore = await scoreStarter(remainingDeck[index]);
+      if (!cutScore) return null;
+      cutScores.push(cutScore);
     }
   }
 
-  return total / iterations;
+  return {
+    cribAvg: total / iterations,
+    cutScores
+  };
 }
 
 function renderDeck() {
@@ -750,20 +767,22 @@ async function renderResults(selectedCards, starter, token) {
 
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index];
-    const cribAvg = await averageCribAsync(candidate.discard, candidate.cutDeck, starter, shouldContinue);
-    if (!shouldContinue() || cribAvg === null) return;
+    const cribResult = await averageCribAsync(candidate.discard, candidate.cutDeck, starter, shouldContinue);
+    if (!shouldContinue() || cribResult === null) return;
+    const cribAvg = cribResult.cribAvg;
     const net = owner === "mine" ? candidate.handAvg + cribAvg : candidate.handAvg - cribAvg;
     rows.push({
       keep: candidate.keep,
       discard: candidate.discard,
       handAvg: candidate.handAvg,
       cribAvg,
-      net
+      net,
+      cutInsights: cutInsights(candidate.keep, cribResult.cutScores, owner)
     });
     rows.sort((a, b) => b.net - a.net);
 
     const isDone = rows.length === candidates.length;
-    renderResultSummary(rows[0], isDone);
+    renderResultSummary(rows[0], isDone, starter);
     renderResultRows(rows);
     const progress = Math.round((rows.length / candidates.length) * 100);
     resultMetaEl.textContent = isDone
@@ -774,15 +793,41 @@ async function renderResults(selectedCards, starter, token) {
   }
 }
 
-function renderResultSummary(best, isFinal) {
+function cutInsights(keep, cutScores, owner) {
+  return cutScores.map(({ starter, cribAvg }) => {
+    const handScore = scoreFiveCards(keep, starter);
+    const net = owner === "mine" ? handScore + cribAvg : handScore - cribAvg;
+    return { starter, handScore, cribAvg, net };
+  }).sort((a, b) => b.net - a.net);
+}
+
+function renderResultSummary(best, isFinal, fixedStarter) {
   summaryEl.replaceChildren();
-  summaryEl.append(isFinal ? "Best discard: " : "Best so far: ");
+  const bestLine = document.createElement("div");
+  bestLine.append(isFinal ? "Best discard: " : "Best so far: ");
   const strongDiscard = document.createElement("strong");
   strongDiscard.textContent = best.discard.map(cardLabel).join(" ");
-  summaryEl.append(strongDiscard, ". Expected net: ");
+  bestLine.append(strongDiscard, ". Expected net: ");
   const strongNet = document.createElement("strong");
   strongNet.textContent = best.net.toFixed(2);
-  summaryEl.append(strongNet, ".");
+  bestLine.append(strongNet, ".");
+  summaryEl.append(bestLine);
+
+  if (!best.cutInsights.length) return;
+  const cutLine = document.createElement("div");
+  cutLine.className = "cutInsight";
+  cutLine.append(fixedStarter ? "Cut card: " : "Best cuts for this discard: ");
+  best.cutInsights.slice(0, 3).forEach((cut) => {
+    const card = document.createElement("span");
+    card.className = `pill cutPill ${isRed(cut.starter) ? "red" : ""}`;
+    card.textContent = cardLabel(cut.starter);
+
+    const score = document.createElement("span");
+    score.className = "cutScore";
+    score.textContent = `${cut.net.toFixed(2)} net`;
+    cutLine.append(card, score);
+  });
+  summaryEl.append(cutLine);
 }
 
 function resultMetaText(starter) {
