@@ -28,28 +28,21 @@ const scanHandButton = document.querySelector("#scanHandButton");
 const scanHandInput = document.querySelector("#scanHandInput");
 const scanStatusEl = document.querySelector("#scanStatus");
 
-let transformersModelPromise = null;
+let yoloModelPromise = null;
 
-const florenceScanPrompts = [
-  "<OCR>",
-  "List every visible playing card from left to right. Use only compact codes like 7H 8C 9S 10D JC QS KH.",
-  "Identify all visible playing cards. Return only rank and suit codes using S H D C."
+const yoloInputSize = 640;
+const yoloConfidenceThreshold = 0.35;
+const yoloIouThreshold = 0.45;
+const yoloModelPath = "models/playing-cards.onnx";
+const yoloLabels = [
+  "10C", "10D", "10H", "10S", "2C", "2D", "2H", "2S",
+  "3C", "3D", "3H", "3S", "4C", "4D", "4H", "4S",
+  "5C", "5D", "5H", "5S", "6C", "6D", "6H", "6S",
+  "7C", "7D", "7H", "7S", "8C", "8D", "8H", "8S",
+  "9C", "9D", "9H", "9S", "AC", "AD", "AH", "AS",
+  "JC", "JD", "JH", "JS", "KC", "KD", "KH", "KS",
+  "QC", "QD", "QH", "QS"
 ];
-
-function preferredVisionDevices() {
-  return typeof navigator !== "undefined" && navigator.gpu ? ["webgpu"] : [];
-}
-
-function florenceDtype(device) {
-  if (device === "wasm") return "q4";
-
-  return {
-    embed_tokens: "fp16",
-    vision_encoder: "fp16",
-    encoder_model: "q4",
-    decoder_model_merged: "q4",
-  };
-}
 
 function dealtCount() {
   return playersSelect.value === "2" ? 6 : 5;
@@ -333,61 +326,42 @@ function setScanStatus(message, tone = "") {
   scanStatusEl.dataset.tone = tone;
 }
 
-async function loadTransformers() {
-  if (transformersModelPromise) return transformersModelPromise;
-
-  transformersModelPromise = (async () => {
-    const {
-      Florence2ForConditionalGeneration,
-      AutoProcessor,
-      AutoTokenizer,
-      RawImage,
-      env
-    } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2");
-
-    env.allowLocalModels = false;
-    env.useBrowserCache = typeof caches !== "undefined";
-
-    const modelId = "onnx-community/Florence-2-base-ft";
-    let model = null;
-    let device = "";
-    let lastError = null;
-    const progressCallback = (p) => {
-      if (p.status === "progress") {
-        setScanStatus(`Downloading model: ${p.progress.toFixed(1)}%`);
-      }
-    };
-
-    const devices = preferredVisionDevices();
-    if (devices.length === 0) {
-      throw new Error("Photo scan needs WebGPU on this static version. Select cards manually or add a server-side scanner.");
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      existing.addEventListener("load", resolve, { once: true });
+      existing.addEventListener("error", reject, { once: true });
+      if (window.ort) resolve();
+      return;
     }
 
-    for (const candidate of devices) {
-      try {
-        device = candidate;
-        setScanStatus(`Loading Vision Model with ${candidate.toUpperCase()}...`);
-        model = await Florence2ForConditionalGeneration.from_pretrained(modelId, {
-          device: candidate,
-          dtype: florenceDtype(candidate),
-          progress_callback: progressCallback
-        });
-        break;
-      } catch (error) {
-        lastError = error;
-        throw error;
-      }
-    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error("The ONNX runtime could not be loaded."));
+    document.head.append(script);
+  });
+}
 
-    if (!model) throw lastError || new Error("The vision model could not be loaded.");
+async function loadYoloModel() {
+  if (yoloModelPromise) return yoloModelPromise;
 
-    const processor = await AutoProcessor.from_pretrained(modelId);
-    const tokenizer = await AutoTokenizer.from_pretrained(modelId);
+  yoloModelPromise = (async () => {
+    setScanStatus("Loading card detector...");
+    await loadScript("https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/ort.min.js");
+    window.ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.26.0/dist/";
+    window.ort.env.wasm.numThreads = 1;
 
-    return { model, processor, tokenizer, RawImage, device };
+    const session = await window.ort.InferenceSession.create(yoloModelPath, {
+      executionProviders: ["wasm"]
+    });
+
+    return { session, labels: yoloLabels };
   })();
 
-  return transformersModelPromise;
+  return yoloModelPromise;
 }
 
 async function prepareScanImage(file) {
@@ -405,167 +379,208 @@ async function prepareScanImage(file) {
   return canvas;
 }
 
-function cropCanvas(source, x, y, width, height) {
+function yoloInputFromCanvas(source) {
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(width);
-  canvas.height = Math.round(height);
+  canvas.width = yoloInputSize;
+  canvas.height = yoloInputSize;
   const context = canvas.getContext("2d");
-  context.drawImage(source, x, y, width, height, 0, 0, canvas.width, canvas.height);
-  return canvas;
-}
+  const scale = Math.min(yoloInputSize / source.width, yoloInputSize / source.height);
+  const width = Math.round(source.width * scale);
+  const height = Math.round(source.height * scale);
+  const padX = Math.floor((yoloInputSize - width) / 2);
+  const padY = Math.floor((yoloInputSize - height) / 2);
 
-function scanImageVariants(canvas) {
-  return [
-    { label: "full image", canvas },
-    {
-      label: "card indexes",
-      canvas: cropCanvas(canvas, 0, 0, canvas.width, Math.max(1, canvas.height * 0.68))
-    }
-  ];
-}
+  context.fillStyle = "rgb(114, 114, 114)";
+  context.fillRect(0, 0, yoloInputSize, yoloInputSize);
+  context.drawImage(source, padX, padY, width, height);
 
-function normalizeRank(rank) {
-  const normalized = rank.toUpperCase().trim();
-  const map = {
-    "ACE": "A", "TWO": "2", "THREE": "3", "FOUR": "4", "FIVE": "5",
-    "SIX": "6", "SEVEN": "7", "EIGHT": "8", "NINE": "9",
-    "TEN": "10", "JACK": "J", "QUEEN": "Q", "KING": "K",
-    "T": "10", "1O": "10", "IO": "10", "I0": "10", "10": "10"
+  const pixels = context.getImageData(0, 0, yoloInputSize, yoloInputSize).data;
+  const data = new Float32Array(3 * yoloInputSize * yoloInputSize);
+  const planeSize = yoloInputSize * yoloInputSize;
+
+  for (let index = 0; index < planeSize; index += 1) {
+    const pixelIndex = index * 4;
+    data[index] = pixels[pixelIndex] / 255;
+    data[planeSize + index] = pixels[pixelIndex + 1] / 255;
+    data[planeSize * 2 + index] = pixels[pixelIndex + 2] / 255;
+  }
+
+  return {
+    tensor: new window.ort.Tensor("float32", data, [1, 3, yoloInputSize, yoloInputSize]),
+    scale,
+    padX,
+    padY,
+    sourceWidth: source.width,
+    sourceHeight: source.height
   };
-  if (map[normalized]) return map[normalized];
-  if (ranks.includes(normalized)) return normalized;
-  return "";
 }
 
-function normalizeSuit(suit) {
-  const normalized = suit.toUpperCase();
-  if (["S", "SPADE", "SPADES", "♠", "♤"].includes(normalized)) return "S";
-  if (["H", "HEART", "HEARTS", "♥", "♡"].includes(normalized)) return "H";
-  if (["D", "DIAMOND", "DIAMONDS", "♦", "♢"].includes(normalized)) return "D";
-  if (["C", "CLUB", "CLUBS", "♣", "♧"].includes(normalized)) return "C";
-  return "";
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
-function addScannedCard(cards, seen, rank, suit) {
-  const id = `${rank}${suit}`;
-  if (!getCard(id) || seen.has(id)) return;
-  seen.add(id);
-  cards.push(getCard(id));
+function detectionIou(a, b) {
+  const left = Math.max(a.x1, b.x1);
+  const top = Math.max(a.y1, b.y1);
+  const right = Math.min(a.x2, b.x2);
+  const bottom = Math.min(a.y2, b.y2);
+  const width = Math.max(0, right - left);
+  const height = Math.max(0, bottom - top);
+  const intersection = width * height;
+  const areaA = Math.max(0, a.x2 - a.x1) * Math.max(0, a.y2 - a.y1);
+  const areaB = Math.max(0, b.x2 - b.x1) * Math.max(0, b.y2 - b.y1);
+  return intersection / Math.max(1, areaA + areaB - intersection);
 }
 
-function parseScannedCards(rawText) {
-  const directText = rawText
-    .toUpperCase()
-    .replace(/[♡♥]/g, "H")
-    .replace(/[♢♦]/g, "D")
-    .replace(/[♧♣]/g, "C")
-    .replace(/[♤♠]/g, "S")
-    .replace(/\b(?:1O|IO|I0)\b/g, "T")
-    .replace(/10/g, "T");
-  const cards = [];
-  const seen = new Set();
-  const directMatches = directText.matchAll(/\b(T|[A2-9JQK])\s*([SHDC])\b|\b([SHDC])\s*(T|[A2-9JQK])\b/g);
+function nonMaxSuppression(detections) {
+  const selectedDetections = [];
+  const sorted = detections.sort((a, b) => b.score - a.score);
 
-  for (const match of directMatches) {
-    const rank = normalizeRank(match[1] || match[4]);
-    const suit = normalizeSuit(match[2] || match[3]);
-    addScannedCard(cards, seen, rank, suit);
+  for (const detection of sorted) {
+    const duplicate = selectedDetections.some((selectedDetection) => (
+      detection.classIndex === selectedDetection.classIndex
+      && detectionIou(detection, selectedDetection) > yoloIouThreshold
+    ));
+    if (!duplicate) selectedDetections.push(detection);
   }
 
-  const tokenText = rawText
-    .toUpperCase()
-    .replace(/SPADES?/g, " S ")
-    .replace(/HEARTS?/g, " H ")
-    .replace(/DIAMONDS?/g, " D ")
-    .replace(/CLUBS?/g, " C ")
-    .replace(/[♡♥]/g, " H ")
-    .replace(/[♢♦]/g, " D ")
-    .replace(/[♧♣]/g, " C ")
-    .replace(/[♤♠]/g, " S ")
-    .replace(/\b(?:10|1O|IO|I0)\b/g, " T ")
-    .replace(/[^A-Z0-9]+/g, " ");
-  const tokens = tokenText.match(/\b(?:T|[A2-9JQK]|[SHDC]|ACE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|JACK|QUEEN|KING)\b/g) || [];
-  let pendingRank = "";
+  return selectedDetections;
+}
 
-  for (const token of tokens) {
-    const rank = normalizeRank(token);
-    const suit = normalizeSuit(token);
-    if (rank) {
-      pendingRank = rank;
-    } else if (suit && pendingRank) {
-      addScannedCard(cards, seen, pendingRank, suit);
-      pendingRank = "";
-    }
+function parseYoloRawOutput(output, metadata, labels) {
+  const { data, dims } = output;
+  if (dims.length !== 3) {
+    throw new Error(`Unsupported YOLO output shape: ${dims.join("x")}`);
   }
 
-  return cards;
-}
+  const transposed = dims[1] <= dims[2];
+  const attributes = transposed ? dims[1] : dims[2];
+  const predictions = transposed ? dims[2] : dims[1];
+  const hasObjectness = attributes === labels.length + 5;
+  const classOffset = hasObjectness ? 5 : 4;
+  const detections = [];
 
-function mergeScannedCards(cardGroups) {
-  const cards = [];
-  const seen = new Set();
+  const valueAt = (predictionIndex, attributeIndex) => {
+    if (transposed) return data[attributeIndex * predictions + predictionIndex];
+    return data[predictionIndex * attributes + attributeIndex];
+  };
 
-  for (const group of cardGroups) {
-    for (const card of group) {
-      if (seen.has(card.id)) continue;
-      seen.add(card.id);
-      cards.push(card);
-    }
-  }
+  for (let predictionIndex = 0; predictionIndex < predictions; predictionIndex += 1) {
+    let bestClassIndex = -1;
+    let bestClassScore = 0;
 
-  return cards;
-}
-
-function florenceOutputText(result, prompt, generatedText) {
-  const value = result[prompt];
-  if (typeof value === "string") return value;
-  if (value && Array.isArray(value.labels)) return value.labels.join(" ");
-  return generatedText;
-}
-
-async function runFlorenceScanPrompt(model, processor, tokenizer, image, prompt) {
-  const visionInputs = await processor(image);
-  const prompts = processor.construct_prompts(prompt);
-  const textInputs = tokenizer(prompts);
-  const generatedIds = await model.generate({
-    ...textInputs,
-    ...visionInputs,
-    max_new_tokens: 96
-  });
-  const generatedText = tokenizer.batch_decode(generatedIds, {
-    skip_special_tokens: false
-  })[0];
-  const result = processor.post_process_generation(generatedText, prompt, image.size);
-  const text = florenceOutputText(result, prompt, generatedText);
-  console.info("Scan model output", { prompt, text });
-  return parseScannedCards(text);
-}
-
-async function recognizeCardsFromImage(file) {
-  const { model, processor, tokenizer, RawImage, device } = await loadTransformers();
-  const canvas = await prepareScanImage(file);
-
-  setScanStatus(`Analyzing image with ${device.toUpperCase()}...`);
-
-  try {
-    const scans = [];
-    const variants = scanImageVariants(canvas);
-    const total = variants.length * florenceScanPrompts.length;
-    let completed = 0;
-
-    for (const variant of variants) {
-      const image = RawImage.fromCanvas(variant.canvas);
-      for (const prompt of florenceScanPrompts) {
-        completed += 1;
-        setScanStatus(`Analyzing ${variant.label}... ${completed}/${total}`);
-        scans.push(await runFlorenceScanPrompt(model, processor, tokenizer, image, prompt));
+    for (let classIndex = 0; classIndex < labels.length; classIndex += 1) {
+      const score = valueAt(predictionIndex, classOffset + classIndex);
+      if (score > bestClassScore) {
+        bestClassScore = score;
+        bestClassIndex = classIndex;
       }
     }
 
-    return mergeScannedCards(scans);
+    const objectness = hasObjectness ? valueAt(predictionIndex, 4) : 1;
+    const score = bestClassScore * objectness;
+    if (score < yoloConfidenceThreshold || bestClassIndex < 0) continue;
+
+    const centerX = valueAt(predictionIndex, 0);
+    const centerY = valueAt(predictionIndex, 1);
+    const width = valueAt(predictionIndex, 2);
+    const height = valueAt(predictionIndex, 3);
+    const x1 = clamp((centerX - width / 2 - metadata.padX) / metadata.scale, 0, metadata.sourceWidth);
+    const y1 = clamp((centerY - height / 2 - metadata.padY) / metadata.scale, 0, metadata.sourceHeight);
+    const x2 = clamp((centerX + width / 2 - metadata.padX) / metadata.scale, 0, metadata.sourceWidth);
+    const y2 = clamp((centerY + height / 2 - metadata.padY) / metadata.scale, 0, metadata.sourceHeight);
+
+    detections.push({
+      classIndex: bestClassIndex,
+      label: labels[bestClassIndex],
+      score,
+      x1,
+      y1,
+      x2,
+      y2,
+      centerX: (x1 + x2) / 2
+    });
+  }
+
+  return nonMaxSuppression(detections);
+}
+
+function parseYoloNmsOutput(output, metadata, labels) {
+  const { data, dims } = output;
+  if (dims.length !== 3 || dims[2] < 6) return null;
+
+  const detections = [];
+  const rows = dims[1];
+  const attributes = dims[2];
+
+  for (let row = 0; row < rows; row += 1) {
+    const offset = row * attributes;
+    const score = data[offset + 4];
+    const classIndex = Math.round(data[offset + 5]);
+    if (score < yoloConfidenceThreshold || !labels[classIndex]) continue;
+
+    const x1 = clamp((data[offset] - metadata.padX) / metadata.scale, 0, metadata.sourceWidth);
+    const y1 = clamp((data[offset + 1] - metadata.padY) / metadata.scale, 0, metadata.sourceHeight);
+    const x2 = clamp((data[offset + 2] - metadata.padX) / metadata.scale, 0, metadata.sourceWidth);
+    const y2 = clamp((data[offset + 3] - metadata.padY) / metadata.scale, 0, metadata.sourceHeight);
+
+    detections.push({
+      classIndex,
+      label: labels[classIndex],
+      score,
+      x1,
+      y1,
+      x2,
+      y2,
+      centerX: (x1 + x2) / 2
+    });
+  }
+
+  return detections;
+}
+
+function parseYoloDetections(output, metadata, labels) {
+  if (output.dims.length === 3 && output.dims[2] >= 6 && output.dims[2] <= 8) {
+    const detections = parseYoloNmsOutput(output, metadata, labels);
+    if (detections) return detections;
+  }
+
+  return parseYoloRawOutput(output, metadata, labels);
+}
+
+function yoloDetectionsToCards(detections, limit) {
+  const candidates = [];
+  const seen = new Set();
+
+  detections
+    .sort((a, b) => b.score - a.score || a.centerX - b.centerX)
+    .forEach((detection) => {
+      const card = getCard(detection.label);
+      if (!card || seen.has(card.id)) return;
+      seen.add(card.id);
+      candidates.push({ card, detection });
+    });
+
+  const primary = candidates.slice(0, limit).sort((a, b) => a.detection.centerX - b.detection.centerX);
+  return [...primary, ...candidates.slice(limit)].map((candidate) => candidate.card);
+}
+
+async function recognizeCardsFromImage(file) {
+  const { session, labels } = await loadYoloModel();
+  const canvas = await prepareScanImage(file);
+  const input = yoloInputFromCanvas(canvas);
+  const inputName = session.inputNames[0];
+
+  setScanStatus("Detecting cards...");
+
+  try {
+    const outputs = await session.run({ [inputName]: input.tensor });
+    const output = outputs[session.outputNames[0]];
+    const detections = parseYoloDetections(output, input, labels);
+    return yoloDetectionsToCards(detections, dealtCount());
   } catch (e) {
     console.error(e);
-    throw new Error(e.message || "VLM inference failed.");
+    throw new Error(e.message || "Card detector inference failed.");
   }
 }
 
@@ -573,7 +588,7 @@ async function scanHand(file) {
   if (!file) return;
 
   scanHandButton.disabled = true;
-  setScanStatus("Loading Vision Model (~230MB)...");
+  setScanStatus("Loading card detector...");
 
   try {
     const scannedCards = await recognizeCardsFromImage(file);
@@ -588,12 +603,14 @@ async function scanHand(file) {
       return;
     }
 
-    const scannedLabels = scannedCards.slice(0, need).map(cardLabel).join(" ");
+    const filledCards = scannedCards.slice(0, need);
+    const scannedLabels = filledCards.map(cardLabel).join(" ");
     if (scannedCards.length >= need) {
-      setScanStatus(`Scanned ${need} cards: ${scannedLabels}.`);
+      const extra = scannedCards.length > need ? ` ${scannedCards.length - need} lower-confidence candidate${scannedCards.length - need === 1 ? "" : "s"} ignored.` : "";
+      setScanStatus(`Filled ${need} cards: ${scannedLabels}.${extra}`);
     } else {
       const remaining = need - scannedCards.length;
-      setScanStatus(`Scanned ${scannedCards.length} card${scannedCards.length === 1 ? "" : "s"}: ${scannedLabels}. Choose ${remaining} more manually.`);
+      setScanStatus(`Filled ${scannedCards.length} card${scannedCards.length === 1 ? "" : "s"}: ${scannedLabels}. Choose ${remaining} more manually.`);
     }
   } catch (error) {
     setScanStatus(error.message || "Scan failed. Try another photo.", "error");
